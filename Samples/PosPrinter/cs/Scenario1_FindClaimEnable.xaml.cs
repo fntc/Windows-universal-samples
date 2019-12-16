@@ -10,6 +10,8 @@
 //*********************************************************
 
 using System;
+using System.Diagnostics;
+using System.Threading;
 using Windows.UI.Xaml.Controls;
 using Windows.UI.Xaml.Navigation;
 using Windows.Devices.PointOfService;
@@ -25,6 +27,7 @@ namespace SDKTemplate
     {
         private MainPage rootPage = MainPage.Current;
         bool isBusy = false;
+        private Timer _timer;
 
         public Scenario1_FindClaimEnable()
         {
@@ -133,9 +136,24 @@ namespace SDKTemplate
                 // wants to claim the printer away from us.
                 rootPage.SubscribeToReleaseDeviceRequested();
 
+                rootPage.ClaimedPrinter.Closed += (sender, args) => { _timer?.Dispose(); };
+
                 if (await rootPage.ClaimedPrinter.EnableAsync())
                 {
                     rootPage.NotifyUser("Enabled printer.", NotifyType.StatusMessage);
+                    
+
+                    _timer = new Timer(UpdateStatus, rootPage.ClaimedPrinter, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
+                    rootPage.Printer.StatusUpdated += async (sender, args) =>
+                    {
+                        //BUG: StatusUpdated is never fired!
+                        await MainPage.Current.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
+                        {
+                            rootPage.NotifyUser("Status updated event: " + args.Status.StatusKind.ToString(), NotifyType.StatusMessage);
+                            UpdateStatus(rootPage.ClaimedPrinter.Receipt);
+                        });
+                    };
+
                 }
                 else
                 {
@@ -146,6 +164,25 @@ namespace SDKTemplate
 
             isBusy = false;
             UpdateButtons();
+        }
+
+        private void UpdateStatus(object state)
+        {
+            var sw = Stopwatch.StartNew();
+            //var health = rootPage.Printer.CheckHealthAsync(UnifiedPosHealthCheckLevel.POSInternal).GetAwaiter().GetResult();
+            var claimed = state as ClaimedPosPrinter;
+            //var enabled = claimed.IsEnabled;
+            var printer = claimed.Receipt;
+            
+            var coverOpen = printer.IsCoverOpen;
+            var empty = printer.IsCartridgeEmpty;
+            var removed = printer.IsCartridgeRemoved;
+            var cleaning = printer.IsHeadCleaning;
+            var paperempty = printer.IsPaperEmpty;
+            var papernearend = printer.IsPaperNearEnd;
+            var ready = printer.IsReadyToPrint;
+            sw.Stop();
+            Debug.WriteLine($"{sw.ElapsedMilliseconds}ms to query {coverOpen},{empty},{removed},{cleaning},{paperempty},{papernearend} - {ready}");
         }
 
         void IsImportantTransaction_Click()
